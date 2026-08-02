@@ -1,10 +1,10 @@
-# The Lenny Growth Assistant (Simple Edition)
+# The Lenny Growth Assistant
 
-A minimal, local-first version of the Lenny Growth Assistant: chat with an
+local-first version of the Lenny Growth Assistant: chat with an
 AI grounded in real transcripts from *Lenny's Podcast*, and ask it to turn
 answers into Ship30for30-style essays — rendered live in an artifact panel.
 
-This is intentionally the **simple** version of the assignment: one
+
 FastAPI file, one HTML file, SQLite instead of Postgres, Ollama only (no
 cloud LLM toggle). It is fully functional end-to-end, just without the
 extra infrastructure.
