@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Lenny Growth Assistant</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --border: #2a2e38;
+    --text: #e6e8ee; --muted: #8b93a3; --accent: #6c8cff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+    background: var(--bg); color: var(--text); height: 100vh; overflow: hidden;
+  }
+  .app { display: flex; height: 100vh; }
+
+  /* sidebar */
+  .sidebar { width: 220px; background: var(--panel); border-right: 1px solid var(--border);
+    padding: 12px; display: flex; flex-direction: column; }
+  .sidebar h2 { font-size: 15px; margin: 4px 0 12px; }
+  .new-chat-btn { background: var(--accent); color: white; border: none; border-radius: 8px;
+    padding: 10px; cursor: pointer; font-size: 14px; margin-bottom: 10px; }
+  .session-item { padding: 8px 10px; border-radius: 6px; cursor: pointer; font-size: 13px;
+    color: var(--muted); margin-bottom: 4px; }
+  .session-item:hover, .session-item.active { background: #23273233; color: var(--text); }
+
+  /* chat column */
+  .chat-col { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .chat-header { padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 14px;
+    color: var(--muted); display: flex; justify-content: space-between; align-items: center; }
+  .mode-toggle { display: flex; gap: 6px; }
+  .mode-toggle button { background: transparent; border: 1px solid var(--border); color: var(--muted);
+    padding: 5px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+  .mode-toggle button.active { background: var(--accent); color: white; border-color: var(--accent); }
+
+  .messages { flex: 1; overflow-y: auto; padding: 20px; }
+  .msg { max-width: 75%; margin-bottom: 14px; padding: 10px 14px; border-radius: 10px;
+    line-height: 1.5; font-size: 14px; white-space: pre-wrap; }
+  .msg.user { background: var(--accent); margin-left: auto; color: white; }
+  .msg.assistant { background: var(--panel); border: 1px solid var(--border); }
+  .msg.meta { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+  .input-row { padding: 14px; border-top: 1px solid var(--border); display: flex; gap: 8px; }
+  .input-row textarea { flex: 1; resize: none; background: var(--panel); border: 1px solid var(--border);
+    color: var(--text); border-radius: 8px; padding: 10px; font-size: 14px; height: 46px; }
+  .input-row button { background: var(--accent); border: none; color: white; padding: 0 18px;
+    border-radius: 8px; cursor: pointer; }
+
+  /* artifact panel */
+  .artifact-col { width: 40%; border-left: 1px solid var(--border); background: var(--panel);
+    display: flex; flex-direction: column; }
+  .artifact-col.hidden { display: none; }
+  .artifact-header { padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 13px;
+    color: var(--muted); display: flex; justify-content: space-between; }
+  .artifact-body { flex: 1; overflow: auto; padding: 16px; }
+  .artifact-body iframe { width: 100%; height: 100%; border: none; background: white; border-radius: 6px; }
+  .artifact-body pre { white-space: pre-wrap; font-size: 13px; }
+  .close-btn { cursor: pointer; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="sidebar">
+    <h2>🌱 Lenny Assistant</h2>
+    <button class="new-chat-btn" onclick="newChat()">+ New Chat</button>
+    <div id="sessionList"></div>
+  </div>
+
+  <div class="chat-col">
+    <div class="chat-header">
+      <span id="sessionLabel">No session yet</span>
+      <div class="mode-toggle">
+        <button id="mode-auto" class="active" onclick="setMode('auto')">Auto</button>
+        <button id="mode-qa" onclick="setMode('qa')">Q&A</button>
+        <button id="mode-ship30" onclick="setMode('ship30')">Ship30</button>
+      </div>
+    </div>
+    <div class="messages" id="messages"></div>
+    <div class="input-row">
+      <textarea id="input" placeholder="Ask about product & growth (from Lenny's Podcast)... e.g. 'How does Brian Balfour think about growth loops?'"></textarea>
+      <button onclick="send()">Send</button>
+    </div>
+  </div>
+
+  <div class="artifact-col hidden" id="artifactCol">
+    <div class="artifact-header">
+      <span id="artifactTitle">Artifact</span>
+      <span class="close-btn" onclick="closeArtifact()">✕</span>
+    </div>
+    <div class="artifact-body" id="artifactBody"></div>
+  </div>
+
+</div>
+
+<script>
+const API = "http://localhost:8000";
+let currentSession = null;
+let mode = "auto"; // auto | qa | ship30
+
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll(".mode-toggle button").forEach(b => b.classList.remove("active"));
+  document.getElementById("mode-" + m).classList.add("active");
+}
+
+async function refreshSessions() {
+  const res = await fetch(`${API}/sessions`);
+  const sessions = await res.json();
+  const list = document.getElementById("sessionList");
+  list.innerHTML = "";
+  sessions.forEach(s => {
+    const div = document.createElement("div");
+    div.className = "session-item" + (s.id === currentSession ? " active" : "");
+    div.textContent = s.title || "Untitled";
+    div.onclick = () => loadSession(s.id);
+    list.appendChild(div);
+  });
+}
+
+async function newChat() {
+  const res = await fetch(`${API}/sessions`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title: "New Chat" })
+  });
+  const data = await res.json();
+  currentSession = data.session_id;
+  document.getElementById("messages").innerHTML = "";
+  document.getElementById("sessionLabel").textContent = "New Chat";
+  closeArtifact();
+  await refreshSessions();
+}
+
+async function loadSession(id) {
+  currentSession = id;
+  document.getElementById("sessionLabel").textContent = "Chat " + id.slice(0, 8);
+  const res = await fetch(`${API}/sessions/${id}/messages`);
+  const msgs = await res.json();
+  const box = document.getElementById("messages");
+  box.innerHTML = "";
+  msgs.forEach(m => renderMessage(m.role, m.content, m.artifact));
+  await refreshSessions();
+}
+
+function renderMessage(role, content, artifact) {
+  const box = document.getElementById("messages");
+  const div = document.createElement("div");
+  div.className = "msg " + role;
+  div.textContent = content;
+  box.appendChild(div);
+  if (artifact) {
+    const note = document.createElement("div");
+    note.className = "msg meta";
+    note.textContent = "📄 Artifact generated — click to view →";
+    note.style.cursor = "pointer";
+    note.onclick = () => showArtifact(artifact);
+    box.appendChild(note);
+  }
+  box.scrollTop = box.scrollHeight;
+}
+
+function showArtifact(artifact) {
+  const col = document.getElementById("artifactCol");
+  const body = document.getElementById("artifactBody");
+  const title = document.getElementById("artifactTitle");
+  col.classList.remove("hidden");
+  title.textContent = artifact.type === "html" ? "HTML Artifact" : "Markdown Artifact";
+  body.innerHTML = "";
+  if (artifact.type === "html") {
+    const iframe = document.createElement("iframe");
+    body.appendChild(iframe);
+    iframe.srcdoc = artifact.content;
+  } else {
+    // simple markdown-ish rendering (bold + bullets), not a full parser
+    const pre = document.createElement("div");
+    let html = artifact.content
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+      .replace(/^- (.+)$/gm, "• $1")
+      .replace(/\n/g, "<br>");
+    pre.innerHTML = html;
+    body.appendChild(pre);
+  }
+}
+
+function closeArtifact() {
+  document.getElementById("artifactCol").classList.add("hidden");
+}
+
+async function send() {
+  const input = document.getElementById("input");
+  const text = input.value.trim();
+  if (!text) return;
+  if (!currentSession) await newChat();
+
+  renderMessage("user", text, null);
+  input.value = "";
+
+  const thinking = document.createElement("div");
+  thinking.className = "msg assistant";
+  thinking.textContent = "Thinking...";
+  document.getElementById("messages").appendChild(thinking);
+
+  try {
+    const res = await fetch(`${API}/sessions/${currentSession}/chat`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: text, mode: mode === "auto" ? null : mode })
+    });
+    const data = await res.json();
+    thinking.remove();
+    if (!res.ok) {
+      renderMessage("assistant", "⚠️ " + (data.detail || "Something went wrong."), null);
+      return;
+    }
+    renderMessage("assistant", data.reply, data.artifact);
+    if (data.artifact) showArtifact(data.artifact);
+  } catch (e) {
+    thinking.remove();
+    renderMessage("assistant", "⚠️ Could not reach the backend at " + API, null);
+  }
+}
+
+document.getElementById("input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+});
+
+refreshSessions();
+</script>
+</body>
+</html>
